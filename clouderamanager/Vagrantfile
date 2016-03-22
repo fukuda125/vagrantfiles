@@ -1,0 +1,152 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+#Cloudera Manager本体のインストールシェル
+$master_script = <<SCRIPT
+#!/bin/bash
+
+sudo yum -y install cloudera-manager*
+sudo service cloudera-scm-server-db initdb
+sudo service cloudera-scm-server-db start
+sudo service cloudera-scm-server start
+SCRIPT
+
+#host追加シェル
+$hosts_script = <<SCRIPT
+cat > /etc/hosts <<EOF
+127.0.0.1       localhost
+
+# The following lines are desirable for IPv6 capable hosts
+::1     ip6-localhost ip6-loopback
+fe00::0 ip6-localnet
+ff00::0 ip6-mcastprefix
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+
+EOF
+SCRIPT
+
+#ntpd設定シェル
+$ntp_script = <<SCRIPT
+#!/bin/bash
+sudo cp -p /usr/share/zoneinfo/Japan /etc/localtime
+sudo yum -y install ntp
+sudo ntpdate ntp.nict.jp
+
+cat > /etc/ntp.conf <<EOF
+server -4 ntp.nict.jp
+server -4 ntp1.jst.mfeed.ad.jp
+server -4 ntp2.jst.mfeed.ad.jp
+server -4 ntp3.jst.mfeed.ad.jp
+EOF
+
+sudo service ntpd start
+sudo chkconfig ntpd on
+SCRIPT
+
+#swap設定シェル
+$common_script = <<SCRIPT
+#!/bin/bash
+
+cat > /etc/yum.repos.d/cloudera-manager.repo <<EOF
+[cloudera-manager]
+name = Cloudera Manager, Version 5.4.8
+baseurl = http://archive.cloudera.com/cm5/redhat/6/x86_64/cm/5.4.8/
+gpgkey = http://archive.cloudera.com/redhat/cdh/RPM-GPG-KEY-cloudera
+gpgcheck = 1
+EOF
+
+cat >> /etc/sysctl.conf <<EOF
+vm.swappiness = 0
+EOF
+
+cat >> /etc/rc.local <<EOF
+# disable transparent hugepages
+if test -f /sys/kernel/mm/transparent_hugepage/enabled; then
+   echo never > /sys/kernel/mm/transparent_hugepage/enabled
+fi
+if test -f /sys/kernel/mm/transparent_hugepage/defrag; then
+   echo never > /sys/kernel/mm/transparent_hugepage/defrag
+fi
+EOF
+
+cat >> /etc/yum.conf <<EOF
+timeout=600
+EOF
+
+sudo rpm --import http://apt.sw.be/RPM-GPG-KEY.dag.txt
+
+sudo yum -y install oracle-j2sdk1.7
+
+SCRIPT
+
+Vagrant.configure(2) do |config|
+  config.vm.box = "centos65_50"
+  config.vm.box_url = "https://googledrive.com/host/0B4tZlTbOXHYWVGpHRWZuTThGVUE/centos65_virtualbox_50G.box"
+
+  config.hostmanager.enabled = false
+  config.hostmanager.manage_host = true
+  config.hostmanager.include_offline = true
+  config.hostmanager.ignore_private_ip = false
+
+  config.vm.define :master do |master|
+    master.vm.provider :virtualbox do |v|
+      v.name = "vm-cluster-node1"
+      v.customize ["modifyvm", :id, "--memory", "7168", "--cpus", 6, "--ioapic", "on"]
+    end
+
+    master.vm.network :forwarded_port, guest: 7180, host: 7180
+    master.vm.network :forwarded_port, guest: 8888, host: 8888
+    master.vm.network :forwarded_port, guest: 50070, host: 50070
+    master.vm.network :private_network, ip: "10.211.55.100"
+    master.vm.hostname = "vm-cluster-node1"
+    master.vm.provision :shell, :inline => $hosts_script
+    master.vm.provision :hostmanager
+    master.vm.provision :shell, :inline => $common_script
+    master.vm.provision :shell, :inline => $master_script
+    master.vm.provision :shell, :inline => $ntp_script
+  end
+
+  config.vm.define :slave1 do |slave1|
+    slave1.vm.box = "centos65_50"
+    slave1.vm.provider :virtualbox do |v|
+      v.name = "vm-cluster-node2"
+      v.customize ["modifyvm", :id, "--memory", "1024", "--cpus", 1, "--ioapic", "on"]
+    end
+    slave1.vm.network :private_network, ip: "10.211.55.101"
+    slave1.vm.hostname = "vm-cluster-node2"
+    slave1.vm.provision :shell, :inline => $hosts_script
+    slave1.vm.provision :hostmanager
+    slave1.vm.provision :shell, :inline => $common_script
+    slave1.vm.provision :shell, :inline => $ntp_script
+  end
+
+  config.vm.define :slave2 do |slave2|
+    slave2.vm.box = "centos65_50"
+    slave2.vm.provider :virtualbox do |v|
+      v.name = "vm-cluster-node3"
+      v.customize ["modifyvm", :id, "--memory", "1024", "--cpus", 1, "--ioapic", "on"]
+    end
+    slave2.vm.network :private_network, ip: "10.211.55.102"
+    slave2.vm.hostname = "vm-cluster-node3"
+    slave2.vm.provision :shell, :inline => $hosts_script
+    slave2.vm.provision :hostmanager
+    slave2.vm.provision :shell, :inline => $common_script
+    slave2.vm.provision :shell, :inline => $ntp_script
+  end
+
+  config.vm.define :slave3 do |slave3|
+    slave3.vm.box = "centos65_50"
+    slave3.vm.provider :virtualbox do |v|
+      v.name = "vm-cluster-node4"
+      v.customize ["modifyvm", :id, "--memory", "1024", "--cpus", 1, "--ioapic", "on"]
+    end
+    slave3.vm.network :private_network, ip: "10.211.55.103"
+    slave3.vm.hostname = "vm-cluster-node4"
+    slave3.vm.provision :shell, :inline => $hosts_script
+    slave3.vm.provision :hostmanager
+    slave3.vm.provision :shell, :inline => $common_script
+    slave3.vm.provision :shell, :inline => $ntp_script
+  end
+
+end

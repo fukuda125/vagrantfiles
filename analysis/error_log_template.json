@@ -1,0 +1,41 @@
+{
+  "template": "logerror-*",
+  "settings": {
+    "number_of_shards": "1",
+    "number_of_replicas": "0"
+  },
+  "mappings": {
+    "_default_": {
+      "dynamic_templates": [
+        {
+          "string_template": {
+            "mapping": {
+              "index": "not_analyzed",
+              "type": "string"
+            },
+            "match_mapping_type": "string",
+            "match": "*"
+          }
+        }
+      ],
+      "properties": {
+        "message": {
+          "type": "multi_field",
+          "fields": {
+            "no_analyzed": {
+              "index": "not_analyzed",
+              "type": "string"
+            },
+            "analyzed": {
+              "index": "analyzed",
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "aliases": {
+    "error-log": {}
+  }
+}

@@ -1,0 +1,167 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+#インストールシェル
+$master_script = <<SCRIPT
+#!/bin/bash
+
+sudo yum -y install java-1.8.0-openjdk-devel.x86_64
+sudo yum -y install wget
+
+#Elasticsearchインストール
+sudo wget https://download.elasticsearch.org/elasticsearch/release/org/elasticsearch/distribution/rpm/elasticsearch/2.0.0/elasticsearch-2.0.0.rpm
+sudo rpm -ivh elasticsearch-2.0.0.rpm
+sudo chkconfig --add elasticsearch
+sudo chkconfig elasticsearch on
+sudo service elasticsearch start
+sudo /usr/share/elasticsearch/bin/plugin install license
+sudo /usr/share/elasticsearch/bin/plugin install marvel-agent
+sudo /usr/share/elasticsearch/bin/plugin install analysis-kuromoji
+sudo /usr/share/elasticsearch/bin/plugin install lmenezes/elasticsearch-kopf/
+
+#kibana4 インストール
+wget https://download.elastic.co/kibana/kibana/kibana-4.2.0-linux-x64.tar.gz
+tar zxvf kibana-4.2.0-linux-x64.tar.gz
+sudo mv /home/vagrant/kibana-4.2.0-linux-x64 /usr/share/kibana4
+sudo /usr/share/kibana4/bin/kibana plugin --install elasticsearch/marvel/latest
+sudo cp /home/vagrant/shell/kibana4 /etc/init.d/
+sudo chmod 755 /etc/init.d/kibana4
+sudo chkconfig kibana4 on
+sudo chkconfig --list | grep kibana
+sudo service kibana4 start
+
+#nginx インストール
+sudo rpm -ivh http://nginx.org/packages/centos/6/noarch/RPMS/nginx-release-centos-6-0.el6.ngx.noarch.rpm
+sudo yum -y install nginx
+sudo mv /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf.old
+sudo cp /home/vagrant/shell/kopf.conf /etc/nginx/conf.d/
+sudo service nginx start
+
+#Elasticsearchのテンプレート登録
+sudo curl -XPUT localhost:9200/_template/access_log_template -d "`cat /home/vagrant/shell/access_log_template.json `"
+
+SCRIPT
+
+#fluentd インストール
+$fluentd_script = <<SCRIPT
+cat > /etc/security/limits.conf <<EOF
+root soft nofile 65536
+root hard nofile 65536
+EOF
+
+cat > /etc/sysctl.conf  <<EOF
+net.ipv4.tcp_tw_recycle = 1
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.ip_local_port_range = 10240    65535
+EOF
+
+sudo curl -L http://toolbelt.treasuredata.com/sh/install-redhat.sh | sh
+sudo chkconfig td-agent on
+sudo chkconfig --list | grep td-agent
+sudo rm -rf /etc/td-agent/td-agent.conf
+
+cd /usr/lib64/fluent/ruby/bin/
+./fluent-gem install fluent-mixin-plaintextformatter --no-ri --no-rdoc -V
+./fluent-gem install fluent-plugin-webhdfs --no-ri --no-rdoc -V
+./fluent-gem install fluent-plugin-formatter_tsv --no-ri --no-rdoc -V
+./fluent-gem install fluent-plugin-elasticsearch --no-ri --no-rdoc -V
+
+sudo cp /home/vagrant/shell/$1 /etc/td-agent/td-agent.conf
+sudo service td-agent start
+SCRIPT
+
+#httpdインストール
+$httpd_script = <<SCRIPT
+sudo yum -y install httpd
+sudo chkconfig httpd on
+sudo chkconfig --list | grep httpd
+sudo service httpd start
+sudo chmod -R 755 /var/log/httpd/
+SCRIPT
+
+#host追加シェル
+$hosts_script = <<SCRIPT
+cat > /etc/hosts <<EOF
+127.0.0.1       localhost
+
+# The following lines are desirable for IPv6 capable hosts
+::1     ip6-localhost ip6-loopback
+fe00::0 ip6-localnet
+ff00::0 ip6-mcastprefix
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+
+EOF
+SCRIPT
+
+#ntpd設定シェル
+$ntp_script = <<SCRIPT
+#!/bin/bash
+sudo cp -p /usr/share/zoneinfo/Japan /etc/localtime
+sudo yum -y install ntp
+sudo ntpdate ntp.nict.jp
+sudo rm -rf /etc/ntp.conf
+
+cat > /etc/ntp.conf <<EOF
+server -4 ntp.nict.jp
+server -4 ntp1.jst.mfeed.ad.jp
+server -4 ntp2.jst.mfeed.ad.jp
+server -4 ntp3.jst.mfeed.ad.jp
+EOF
+
+sudo service ntpd start
+sudo chkconfig ntpd on
+SCRIPT
+
+#web設定
+$web_script = <<SCRIPT
+#!/bin/bash
+crontab /home/vagrant/shell/cron
+
+cat > /var/www/html/index.html  <<EOF
+test
+EOF
+
+SCRIPT
+
+Vagrant.configure(2) do |config|
+  config.vm.box = "centos65_50"
+  config.vm.box_url = "https://googledrive.com/host/0B4tZlTbOXHYWVGpHRWZuTThGVUE/centos65_virtualbox_50G.box"
+
+  config.hostmanager.enabled = false
+  config.hostmanager.manage_host = true
+  config.hostmanager.include_offline = true
+  config.hostmanager.ignore_private_ip = false
+
+  config.vm.define :analysis do |analysis|
+    analysis.vm.provider :virtualbox do |v|
+      v.name = "analysis"
+      v.customize ["modifyvm", :id, "--memory", "2048", "--cpus", 2, "--ioapic", "on"]
+    end
+    analysis.vm.network :private_network, ip: "10.211.55.100"
+    analysis.vm.hostname = "analysis"
+    analysis.vm.synced_folder "./", "/home/vagrant/shell", type:"rsync", rsync__exclude: [".git/", "node_modules"]
+    analysis.vm.provision :shell, :inline => $ntp_script
+    analysis.vm.provision :shell, :inline => $hosts_script
+    analysis.vm.provision :hostmanager
+    analysis.vm.provision :shell, :inline => $master_script
+    analysis.vm.provision :shell, :inline => $fluentd_script, args: "td-agent.server.conf"
+  end
+
+  config.vm.define :web do |web|
+    web.vm.box = "centos65_50"
+    web.vm.provider :virtualbox do |v|
+      v.name = "web"
+      v.customize ["modifyvm", :id, "--memory", "1024", "--cpus", 1, "--ioapic", "on"]
+    end
+    web.vm.network :private_network, ip: "10.211.55.101"
+    web.vm.hostname = "web"
+    web.vm.synced_folder "./", "/home/vagrant/shell", type:"rsync", rsync__exclude: [".git/", "node_modules"]
+    web.vm.provision :hostmanager
+    web.vm.provision :shell, :inline => $ntp_script
+    web.vm.provision :shell, :inline => $httpd_script
+    web.vm.provision :shell, :inline => $fluentd_script, args: "td-agent.client.conf"
+    web.vm.provision :shell, :inline => $web_script
+  end
+
+end

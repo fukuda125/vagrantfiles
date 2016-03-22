@@ -1,0 +1,89 @@
+{
+  "template": "logstash-*",
+  "settings": {
+    "number_of_shards": "1",
+    "number_of_replicas": "0"
+  },
+  "mappings": {
+    "_default_": {
+      "dynamic_templates": [
+        {
+          "string_template": {
+            "mapping": {
+              "index": "not_analyzed",
+              "type": "string"
+            },
+            "match_mapping_type": "string",
+            "match": "*"
+          }
+        }
+      ],
+      "properties": {
+        "path": {
+          "type": "multi_field",
+          "fields": {
+            "no_analyzed": {
+              "index": "not_analyzed",
+              "type": "string"
+            },
+            "analyzed": {
+              "index": "analyzed",
+              "type": "string"
+            }
+          }
+        },
+        "referer": {
+          "type": "multi_field",
+          "fields": {
+            "no_analyzed": {
+              "index": "not_analyzed",
+              "type": "string"
+            },
+            "analyzed": {
+              "index": "analyzed",
+              "type": "string"
+            }
+          }
+        },
+        "agent": {
+          "type": "multi_field",
+          "fields": {
+            "no_analyzed": {
+              "index": "not_analyzed",
+              "type": "string"
+            },
+            "analyzed": {
+              "index": "analyzed",
+              "type": "string"
+            }
+          }
+        },
+        "geoip": {
+          "type": "object",
+          "properties": {
+            "location": {
+              "geohash": true,
+              "geohash_precision": 10,
+              "type": "geo_point",
+              "lat_lon": true,
+              "geohash_prefix": true
+            }
+          }
+        },
+        "response": {
+          "copy_to": "response_int",
+          "type": "string"
+        },
+        "bytes": {
+          "type": "long"
+        },
+        "response_int": {
+          "type": "integer"
+        }
+      }
+    }
+  },
+  "aliases": {
+    "access-log": {}
+  }
+}
